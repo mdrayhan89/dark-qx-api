@@ -5,44 +5,71 @@ import websocket
 import time
 from flask import Flask, jsonify, request
 from datetime import datetime
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 
 app = Flask(__name__)
 
-# ব্র্যান্ডিং তথ্য
+# আপনার তথ্য এখানে বসান
+EMAIL = "trrayhan786@gmail.com"
+PASSWORD = "Mdrayhan@655"
 OWNER_INFO = {
     "Owner_Developer": "DARK-X-RAYHAN",
     "Telegram": "@mdrayhan85",
     "Channel": "https://t.me/mdrayhan85"
 }
 
-# গ্লোবাল ডাটা স্টোরেজ
 live_candles = []
+current_cookies = ""
+
+def get_cookies():
+    """সেলেনিয়াম দিয়ে অটোমেটিক নতুন কুকি সংগ্রহ"""
+    global current_cookies
+    print("### Fetching new cookies via Selenium... ###")
+    
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    
+    try:
+        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+        driver.get("https://qxbroker.com/en/sign-in")
+        time.sleep(5)
+        
+        driver.find_element("name", "email").send_keys(EMAIL)
+        driver.find_element("name", "password").send_keys(PASSWORD)
+        driver.find_element("xpath", "//button[@type='submit']").click()
+        
+        time.sleep(10)
+        cookies = driver.get_cookies()
+        current_cookies = "; ".join([f"{c['name']}={c['value']}" for c in cookies])
+        driver.quit()
+        print("### Cookies Updated Successfully ###")
+    except Exception as e:
+        print(f"Login Error: {e}")
 
 def on_message(ws, message):
     global live_candles
-    
-    # Socket.io heartbeats (কানেকশন সচল রাখতে)
     if message == '2':
         ws.send('3')
         return
 
-    # Quotex থেকে আসা ডাটা প্রসেস করা
     if message.startswith('42'):
         try:
-            # সকেট মেসেজ থেকে JSON ডাটা আলাদা করা
-            data_json = json.loads(message[2:])
-            
-            # যদি এটি ক্যান্ডেল ডাটা হয়
-            if data_json[0] == 'candles':
-                candles_list = data_json[1]
-                for item in candles_list:
+            res = json.loads(message[2:])
+            if res[0] == 'candles':
+                for item in res[1]:
                     now = datetime.now()
+                    # আপনার চাওয়া বিস্তারিত আউটপুট ফরম্যাট
                     candle = {
                         "id": str(len(live_candles) + 1),
                         "pair": "USDINR_otc",
                         "timeframe": "M1",
                         "candle_time": datetime.fromtimestamp(item.get('time', time.time())).strftime("%Y-%m-%d %H:%M:00"),
-                        "open": str(item.get('open')), 
+                        "open": str(item.get('open')),
                         "high": str(item.get('high')),
                         "low": str(item.get('low')),
                         "close": str(item.get('close')),
@@ -52,41 +79,33 @@ def on_message(ws, message):
                     }
                     live_candles.insert(0, candle)
             
-            # মেমোরি কন্ট্রোল (সর্বোচ্চ ৫০০ ডাটা রাখবে)
-            if len(live_candles) > 500:
-                live_candles = live_candles[:500]
-                
-        except Exception as e:
-            # ডাটা প্রসেসিংয়ে ভুল হলে প্রিন্ট করবে
-            print(f"Error parsing message: {e}")
-
-def on_open(ws):
-    print("### Connected to Quotex Server ###")
-    # সকেট প্রোটোকল অনুযায়ী স্টার্ট সিগন্যাল
-    ws.send('40')
+            if len(live_candles) > 100:
+                live_candles = live_candles[:100]
+        except:
+            pass
 
 def run_ws():
+    global current_cookies
+    if not current_cookies: get_cookies()
+    
     ws_url = "wss://ws2.market-qx.trade/socket.io/?EIO=3&transport=websocket"
-    
-    # আপনার ভেরিফাইড কুকি
-    my_cookies = "lang=en; _ga=GA1.1.453634495.1773337729; __vid1=89f387f95a92729124e9994373142ae3; OTCTooltip={%22value%22:false}; sonr={%22value%22:false}; balance-visible={%22value%22:true}; nas=[%22EURNZD_otc%22%2C%22AUDNZD_otc%22%2C%22USDARS_otc%22%2C%22USDNGN_otc%22%2C%22USDEGP_otc%22%2C%22USDMXN_otc%22%2C%22USDCOP_otc%22%2C%22USDBDT_otc%22%2C%22NZDJPY_otc%22%2C%22NZDCHF_otc%22%2C%22EURUSD%22%2C%22MCD_otc%22%2C%22USDINR_otc%22%2C%22NZDCAD_otc%22%2C%22PFE_otc%22%2C%22JNJ_otc%22%2C%22USDDZD_otc%22]; z=[[%22graph%22%2C2%2C0%2C0%2C0.6075]]; activeAccount=live; _ga_L4T5GBPFHJ=GS2.1.s1773680809$o11$g1$t1773682029$j16$l0$h0"
-    
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Origin": "https://market-qx.trade",
-        "Cookie": my_cookies
+        "Cookie": current_cookies
     }
     
-    while True: # ডিসকানেক্ট হলে অটোমেটিক রিকানেক্ট করার জন্য
+    while True:
         try:
             ws = websocket.WebSocketApp(
-                ws_url,
-                header=headers,
+                ws_url, header=headers, 
                 on_message=on_message,
-                on_open=on_open
+                on_open=lambda ws: ws.send('42["subscribe_symbol",{"name":"USDINR_otc","period":60}]')
             )
             ws.run_forever()
         except:
+            print("Refreshing session and reconnecting...")
+            get_cookies()
             time.sleep(5)
 
 @app.route('/Qx/Qx.php')
@@ -94,36 +113,18 @@ def get_api():
     target_pair = request.args.get('pair')
     limit = request.args.get('limit', type=int)
     
-    # সকেট কানেক্ট হওয়ার আগ পর্যন্ত যদি ডাটা না থাকে, তবে একটি টেস্ট মেসেজ দেখাবে
     if not live_candles:
-        test_now = datetime.now()
-        test_candle = {
-            "id": "0",
-            "pair": "Waiting for Server...",
-            "candle_time": test_now.strftime("%H:%M:%S"),
-            "status": "Connecting to WebSocket"
-        }
-        return jsonify({**OWNER_INFO, "success": True, "count": 0, "data": [test_candle]})
+        return jsonify({**OWNER_INFO, "success": True, "status": "Connecting to WebSocket..."})
 
     data_to_show = live_candles
-    
     if target_pair:
         data_to_show = [c for c in live_candles if c['pair'].lower() == target_pair.lower()]
     
     if limit:
         data_to_show = data_to_show[:limit]
     
-    return jsonify({
-        **OWNER_INFO,
-        "success": True,
-        "count": len(data_to_show),
-        "data": data_to_show
-    })
+    return jsonify({**OWNER_INFO, "success": True, "count": len(data_to_show), "data": data_to_show})
 
 if __name__ == "__main__":
-    # ব্যাকগ্রাউন্ড থ্রেডে সকেট চালানো
     threading.Thread(target=run_ws, daemon=True).start()
-    
-    # Render এর জন্য পোর্ট কনফিগারেশন
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
