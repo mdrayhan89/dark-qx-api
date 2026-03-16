@@ -1,5 +1,3 @@
 flask
 websocket-client
-selenium
-webdriver-manager
 gunicorn
